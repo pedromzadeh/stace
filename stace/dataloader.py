@@ -12,20 +12,18 @@ class _APICaller(ABC):
 
 class ThingSpeakAPICaller(_APICaller):
     @classmethod
-    def get(cls, channel_id, GET_config):
+    def get(cls, channel_id, **query_params):
         """
-        Fetches data from ThingSpeak.
+        Fetch data from ThingSpeak.
 
         Parameters
         ----------
         channel_id : int
             Channel ID to read from.
 
-        GET_config : dict
-            Specify any custom query, e.g., {"results" : 10} will get the 10 last
-            points from the server.
-            See https://www.mathworks.com/help/thingspeak/readdata.html for possible
-            selections.
+        **query_params : dict, optional
+            Specify any custom query, by default will get the last 10 records.
+            See https://www.mathworks.com/help/thingspeak/readdata.html.
 
         Returns
         -------
@@ -35,18 +33,30 @@ class ThingSpeakAPICaller(_APICaller):
 
         Note
         ----
-        If the channel is private, specify the API key in the `GET_config` as
-        {"api_key" : api_key}.
+        If the channel is private, specify API key as `api_key`.
         """
+        MAX_BATCH_SIZE = 8000
+        query_params = {"results" : 10} | query_params
+
+        if query_params["results"] < MAX_BATCH_SIZE:
+            return cls.get_single_batch(channel_id, **query_params)
+        else:
+            return cls.get_multiple_batches(MAX_BATCH_SIZE, channel_id, **query_params)
+
+    @classmethod
+    def get_single_batch(cls, channel_id, **query_params):
         custom_query = ""
-        for key, val in GET_config.items():
+        for key, val in query_params.items():
             custom_query += str(key) + "=" + str(val) + "&"
-        custom_query = custom_query[:-1]
         get_url = (
             f"https://api.thingspeak.com/"
-            f"channels/{channel_id}/feeds.json?{custom_query}"
+            f"channels/{channel_id}/feeds.json?{custom_query[:-1]}"
         )
         query = requests.get(get_url).json()
+
+        # ensure query isn't empty
+        if len(query["feeds"]) == 0:
+            raise ValueError("No data was fetched.")
 
         # get descriptive field names
         field_names = cls._get_field_names(query)
@@ -60,7 +70,21 @@ class ThingSpeakAPICaller(_APICaller):
         # insert at the beginning a column of timestamps
         df.insert(0, "Timestamp", results_df["created_at"].apply(pd.Timestamp))
 
-        return df
+        return df.sort_values("Timestamp").reset_index(drop=True)
+
+    @classmethod
+    def get_multiple_batches(cls, N_MAX, channel_id, **query_params):
+        N = query_params.get("results")
+        batches = [N_MAX] * (N // N_MAX)
+        batches.append(N % N_MAX) if N % N_MAX != 0 else None
+        res = []
+        start_date = None
+        for batch_size in batches:
+            _config = query_params | {"results" : batch_size, "end" : start_date} if start_date else query_params
+            _df = cls.get_single_batch(channel_id, **_config)
+            res.append(_df)
+            start_date = _df.iloc[0].Timestamp.strftime("%Y-%m-%d %H:%M:%S").replace(" ", "%20")
+        return pd.concat(res).sort_values("Timestamp").reset_index(drop=True)
 
     @staticmethod
     def _get_field_names(query):
@@ -91,13 +115,13 @@ class ThingSpeakAPICaller(_APICaller):
 
 class USGSAPICaller(_APICaller):
     @classmethod
-    def get(cls, GET_config, return_api_response=False):
+    def get(cls, query_params, return_api_response=False):
         """
         Get data from usgs.gov.
 
         Parameters
         ----------
-        GET_config : dict
+        query_params : dict
             Specifies the GET request.
 
         return_api_response : bool, optional
@@ -107,11 +131,11 @@ class USGSAPICaller(_APICaller):
         -------
         pd.DataFrame, JSON (optional)
         """
-        if GET_config["format"] != "json":
+        if query_params["format"] != "json":
             raise NotImplementedError("Can only process JSON formats currently.")
 
         response = requests.get(
-            "https://waterservices.usgs.gov/nwis/iv/", params=GET_config
+            "https://waterservices.usgs.gov/nwis/iv/", params=query_params
         ).json()
 
         # list of dicts, length is number of fields

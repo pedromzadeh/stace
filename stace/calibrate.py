@@ -82,7 +82,7 @@ class TwoPoint(Calibrate):
         np.ndarray of shape (n_samples, )
             Corrected values.
         """
-        return (y2 - y1) / (x2 - x1) * (X - x1) + y1
+        return (self.y2 - self.y1) / (self.x2 - self.x1) * (X - self.x1) + self.y1
 
 
 class ThreePoint(Calibrate):
@@ -128,5 +128,3 @@ class ThreePoint(Calibrate):
         Y = np.array([y1, y2, y3]).reshape(-1, 1)
         X = np.array([[1, x1, x1**2], [1, x2, x2**2], [1, x3, x3**2]])
         return np.linalg.inv(X).dot(Y).reshape(-1)
-
-
