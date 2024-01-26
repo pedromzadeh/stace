@@ -36,7 +36,7 @@ class ThingSpeakAPICaller(_APICaller):
         If the channel is private, specify API key as `api_key`.
         """
         MAX_BATCH_SIZE = 8000
-        query_params = {"results" : 10} | query_params
+        query_params = {"results": 10} | query_params
 
         if query_params["results"] < MAX_BATCH_SIZE:
             return cls.get_single_batch(channel_id, **query_params)
@@ -80,10 +80,16 @@ class ThingSpeakAPICaller(_APICaller):
         res = []
         start_date = None
         for batch_size in batches:
-            _config = query_params | {"results" : batch_size, "end" : start_date} if start_date else query_params
+            _config = (
+                query_params | {"results": batch_size, "end": start_date}
+                if start_date
+                else query_params
+            )
             _df = cls.get_single_batch(channel_id, **_config)
             res.append(_df)
-            start_date = _df.iloc[0].Timestamp.strftime("%Y-%m-%d %H:%M:%S").replace(" ", "%20")
+            start_date = (
+                _df.iloc[0].Timestamp.strftime("%Y-%m-%d %H:%M:%S").replace(" ", "%20")
+            )
         return pd.concat(res).sort_values("Timestamp").reset_index(drop=True)
 
     @staticmethod
